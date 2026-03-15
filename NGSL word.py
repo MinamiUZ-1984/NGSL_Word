@@ -25,28 +25,21 @@ def load_data():
         
         df = df.fillna("")
         
-        # 列名の変換（A列の「番号」も取得します）
-        rename_dict = {
-            "番号": "rank",
-            "単語": "en",
-            "意味": "jp",
-            "例文": "ex_en",
-            "例文訳": "ex_jp"
-        }
-        df = df.rename(columns={k: v for k, v in rename_dict.items() if k in df.columns})
+        # ★修正ポイント1：見出しの文字に依存せず、「列の場所（A列、B列…）」で強制的にデータを取得します。
+        # A列(0): 番号, B列(1): 英単語, C列(2): 意味, D列(3): 品詞(無視), E列(4): 例文, F列(5): 例文訳
+        new_df = pd.DataFrame()
+        cols_count = df.shape[1]
         
-        # 必要な列が欠けていた場合の安全対策
-        for col in ["rank", "en", "jp", "ex_en", "ex_jp"]:
-            if col not in df.columns:
-                if col == "rank":
-                    df[col] = range(1, len(df) + 1) # 番号がなければ自動で1から振る
-                else:
-                    df[col] = ""
+        new_df['rank'] = df.iloc[:, 0] if cols_count > 0 else range(1, len(df) + 1)
+        new_df['en'] = df.iloc[:, 1] if cols_count > 1 else ""
+        new_df['jp'] = df.iloc[:, 2] if cols_count > 2 else ""      # C列を強制的に日本語訳に
+        new_df['ex_en'] = df.iloc[:, 4] if cols_count > 4 else ""   # E列を強制的に例文に
+        new_df['ex_jp'] = df.iloc[:, 5] if cols_count > 5 else ""   # F列を強制的に例文訳に
         
-        # rank列を数値（整数）に変換（エラーの行は除外）
-        df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(0).astype(int)
+        # 番号列を数値に変換（エラー行は除外）
+        new_df['rank'] = pd.to_numeric(new_df['rank'], errors='coerce').fillna(0).astype(int)
         
-        return df
+        return new_df
     except Exception as e:
         st.error(f"CSVの読み込みに失敗しました: {e}")
         return pd.DataFrame()
@@ -67,24 +60,19 @@ min_rank = int(df['rank'].min()) if not df.empty and int(df['rank'].min()) > 0 e
 max_rank = int(df['rank'].max()) if not df.empty else 3000
 
 st.write("▼ 出題範囲を設定（頻度順位）")
-# スライダーで出題範囲を決定
 selected_range = st.slider(
     "出題する番号の範囲を選んでください",
     min_value=min_rank, 
     max_value=max_rank, 
-    value=(min_rank, min(min_rank + 99, max_rank)), # デフォルトは最初の100語
+    value=(min_rank, min(min_rank + 99, max_rank)), 
     label_visibility="collapsed"
 )
 
-# 選択された範囲でデータを絞り込み
 filtered_df = df[(df['rank'] >= selected_range[0]) & (df['rank'] <= selected_range[1])]
-
-# ★データをランダムにシャッフルする
 filtered_df = filtered_df.sample(frac=1).reset_index(drop=True)
 
 st.info(f"📚 **{selected_range[0]} 〜 {selected_range[1]}** 番の単語から、**{len(filtered_df)}語** をランダムに出題します。")
 
-# JSON文字列に変換
 words_json = json.dumps(filtered_df.to_dict(orient="records"))
 
 # --- 音声再生＆UI同期用のHTML/JavaScript ---
@@ -100,7 +88,6 @@ html_code = f"""
         hr {{ margin: 10px 0; border: none; border-top: 1px solid #ccc; }}
         .ex-en {{ font-size: 16px; color: #555; margin-bottom: 5px; min-height: 22px; }}
         .ex-jp {{ font-size: 14px; color: #888; display: none; }}
-        
         button {{ padding: 12px 24px; font-size: 16px; background-color: #1E90FF; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; width: 80%; max-width: 300px; margin-top: 10px; }}
         button:hover {{ background-color: #0066cc; }}
         #stopBtn {{ background-color: #e74c3c; }}
@@ -124,24 +111,35 @@ html_code = f"""
         const words = {words_json}; 
         let currentIndex = 0;
         let isPlaying = false;
-
         const synth = window.speechSynthesis;
 
+        // ★修正ポイント2：OSやブラウザごとに異なる「日本語音声」の内部名をあらゆるパターンで網羅してキャッチします。
         function getVoice(lang) {{
             const voices = synth.getVoices();
-            return voices.find(v => v.lang.includes(lang) && v.lang.includes('US')) || voices.find(v => v.lang.includes(lang));
+            if (lang === 'ja-JP') {{
+                return voices.find(v => v.lang === 'ja-JP' || v.lang === 'ja_JP' || v.lang === 'ja') 
+                    || voices.find(v => v.name.includes('日本語') || v.name.includes('Japanese'));
+            }} else {{
+                return voices.find(v => v.lang.includes('en') && v.lang.includes('US')) 
+                    || voices.find(v => v.lang.includes('en'));
+            }}
         }}
 
         function speak(text, lang, rate=0.9) {{
             return new Promise((resolve) => {{
-                if (!isPlaying || !text) return resolve(); 
-                const utterance = new SpeechSynthesisUtterance(text);
-                utterance.voice = getVoice(lang);
-                utterance.lang = lang;
-                utterance.rate = rate; 
+                if (!isPlaying || !text || text.trim() === "") return resolve(); 
                 
-                // ★間隔を0.4秒（400ミリ秒）に設定
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = lang; // 言語を強制
+                
+                const voice = getVoice(lang);
+                if (voice) {{
+                    utterance.voice = voice;
+                }}
+                
+                utterance.rate = rate; 
                 utterance.onend = () => {{ setTimeout(resolve, 400); }}; 
+                utterance.onerror = () => {{ setTimeout(resolve, 400); }}; // エラーでも止まらないように
                 
                 synth.speak(utterance);
             }});
@@ -156,8 +154,6 @@ html_code = f"""
             document.getElementById('exJp').style.display = 'none';
             document.getElementById('exJp').innerText = wordObj.ex_jp || "";
 
-            // --- ご指定の7段階ステップ ---
-            
             // 1. 英 (B列)
             await speak(wordObj.en, 'en-US');
             
@@ -166,7 +162,7 @@ html_code = f"""
             
             // 3. 日 (C列)
             if (!isPlaying) return;
-            if (wordObj.jp) {{
+            if (wordObj.jp && wordObj.jp.trim() !== "") {{
                 document.getElementById('jpWord').style.display = 'block';
                 await speak(wordObj.jp, 'ja-JP', 1.1);
             }}
@@ -177,19 +173,19 @@ html_code = f"""
 
             // 5. 例文英 (E列)
             if (!isPlaying) return;
-            if (wordObj.ex_en) {{
+            if (wordObj.ex_en && wordObj.ex_en.trim() !== "") {{
                 document.getElementById('exEn').style.display = 'block';
                 await speak(wordObj.ex_en, 'en-US');
             }}
 
             // 6. 例文日 (F列)
             if (!isPlaying) return;
-            if (wordObj.ex_jp) {{
+            if (wordObj.ex_jp && wordObj.ex_jp.trim() !== "") {{
                 document.getElementById('exJp').style.display = 'block';
                 await speak(wordObj.ex_jp, 'ja-JP', 1.1);
             }}
             
-            // 7. 英 (B列) - 締めくくり
+            // 7. 英 (B列)
             if (!isPlaying) return;
             await speak(wordObj.en, 'en-US');
         }}
@@ -200,6 +196,9 @@ html_code = f"""
             document.getElementById('startBtn').style.display = 'none';
             document.getElementById('stopBtn').style.display = 'inline-block';
             document.getElementById('displayArea').style.display = 'block';
+
+            // 隠しコマンド：再生開始時にOSの音声リストを強制ロード
+            synth.getVoices();
 
             while (currentIndex < words.length && isPlaying) {{
                 await playWordSequence(words[currentIndex]);

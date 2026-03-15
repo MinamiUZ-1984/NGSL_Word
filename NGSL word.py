@@ -25,17 +25,27 @@ def load_data():
         
         df = df.fillna("")
         
-        df = df.rename(columns={
+        # 列名の変換（A列の「番号」も取得します）
+        rename_dict = {
+            "番号": "rank",
             "単語": "en",
             "意味": "jp",
             "例文": "ex_en",
             "例文訳": "ex_jp"
-        })
+        }
+        df = df.rename(columns={k: v for k, v in rename_dict.items() if k in df.columns})
         
-        for col in ["en", "jp", "ex_en", "ex_jp"]:
+        # 必要な列が欠けていた場合の安全対策
+        for col in ["rank", "en", "jp", "ex_en", "ex_jp"]:
             if col not in df.columns:
-                df[col] = ""
-                
+                if col == "rank":
+                    df[col] = range(1, len(df) + 1) # 番号がなければ自動で1から振る
+                else:
+                    df[col] = ""
+        
+        # rank列を数値（整数）に変換（エラーの行は除外）
+        df['rank'] = pd.to_numeric(df['rank'], errors='coerce').fillna(0).astype(int)
+        
         return df
     except Exception as e:
         st.error(f"CSVの読み込みに失敗しました: {e}")
@@ -51,7 +61,31 @@ if df.empty:
     st.warning("単語データを読み込めません。vocab.csv がアップロードされているか確認してください。")
     st.stop()
 
-words_json = json.dumps(df.to_dict(orient="records"))
+# --- 🎯 範囲指定とランダム化の設定 ---
+st.divider()
+min_rank = int(df['rank'].min()) if not df.empty and int(df['rank'].min()) > 0 else 1
+max_rank = int(df['rank'].max()) if not df.empty else 3000
+
+st.write("▼ 出題範囲を設定（頻度順位）")
+# スライダーで出題範囲を決定
+selected_range = st.slider(
+    "出題する番号の範囲を選んでください",
+    min_value=min_rank, 
+    max_value=max_rank, 
+    value=(min_rank, min(min_rank + 99, max_rank)), # デフォルトは最初の100語
+    label_visibility="collapsed"
+)
+
+# 選択された範囲でデータを絞り込み
+filtered_df = df[(df['rank'] >= selected_range[0]) & (df['rank'] <= selected_range[1])]
+
+# ★データをランダムにシャッフルする
+filtered_df = filtered_df.sample(frac=1).reset_index(drop=True)
+
+st.info(f"📚 **{selected_range[0]} 〜 {selected_range[1]}** 番の単語から、**{len(filtered_df)}語** をランダムに出題します。")
+
+# JSON文字列に変換
+words_json = json.dumps(filtered_df.to_dict(orient="records"))
 
 # --- 音声再生＆UI同期用のHTML/JavaScript ---
 html_code = f"""
@@ -75,7 +109,7 @@ html_code = f"""
 </head>
 <body>
 
-    <button id="startBtn" onclick="startLearning()">▶️ 聞き流しスタート</button>
+    <button id="startBtn" onclick="startLearning()">▶️ ランダム再生スタート</button>
     <button id="stopBtn" onclick="stopLearning()" style="display: none;">⏹ 停止</button>
 
     <div id="displayArea" class="word-container" style="display: none;">
@@ -106,9 +140,8 @@ html_code = f"""
                 utterance.lang = lang;
                 utterance.rate = rate; 
                 
-                // ★ここが「間隔」の設定です（600 → 200 に変更しました）
-                // もっと短くしたい場合は 100 や 0 に、長くしたい場合は 500 などに変更できます
-                utterance.onend = () => {{ setTimeout(resolve, 200); }}; 
+                // ★間隔を0.4秒（400ミリ秒）に設定
+                utterance.onend = () => {{ setTimeout(resolve, 400); }}; 
                 
                 synth.speak(utterance);
             }});
@@ -123,34 +156,42 @@ html_code = f"""
             document.getElementById('exJp').style.display = 'none';
             document.getElementById('exJp').innerText = wordObj.ex_jp || "";
 
-            // 1. 英語
-            await speak(wordObj.en, 'en-US');
-            // 2. 英語
+            // --- ご指定の7段階ステップ ---
+            
+            // 1. 英 (B列)
             await speak(wordObj.en, 'en-US');
             
-            // 3. 日本語
+            // 2. 英 (B列)
+            await speak(wordObj.en, 'en-US');
+            
+            // 3. 日 (C列)
             if (!isPlaying) return;
             if (wordObj.jp) {{
                 document.getElementById('jpWord').style.display = 'block';
                 await speak(wordObj.jp, 'ja-JP', 1.1);
             }}
 
-            // 4. 英語
+            // 4. 英 (B列)
+            if (!isPlaying) return;
             await speak(wordObj.en, 'en-US');
 
-            // 5. 例文英語
+            // 5. 例文英 (E列)
             if (!isPlaying) return;
             if (wordObj.ex_en) {{
                 document.getElementById('exEn').style.display = 'block';
                 await speak(wordObj.ex_en, 'en-US');
             }}
 
-            // 6. 例文日本語
+            // 6. 例文日 (F列)
             if (!isPlaying) return;
             if (wordObj.ex_jp) {{
                 document.getElementById('exJp').style.display = 'block';
                 await speak(wordObj.ex_jp, 'ja-JP', 1.1);
             }}
+            
+            // 7. 英 (B列) - 締めくくり
+            if (!isPlaying) return;
+            await speak(wordObj.en, 'en-US');
         }}
 
         async function startLearning() {{
@@ -166,7 +207,7 @@ html_code = f"""
             }}
 
             if (currentIndex >= words.length) {{
-                alert("すべての単語が終了しました！");
+                alert("指定範囲の学習がすべて終了しました！");
                 stopLearning();
                 currentIndex = 0; 
             }}

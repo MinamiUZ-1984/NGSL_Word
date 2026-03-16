@@ -3,8 +3,8 @@ import pandas as pd
 import json
 import streamlit.components.v1 as components
 
-# --- ページ設定 ---
-st.set_page_config(page_title="NGSL 聞き流しアプリ", layout="centered")
+# --- ページ設定（アイコン追加） ---
+st.set_page_config(page_title="NGSL 聞き流し", page_icon="🎧", layout="centered")
 
 st.markdown("""
     <style>
@@ -51,30 +51,27 @@ if df.empty:
     st.warning("単語データを読み込めません。vocab.csv がアップロードされているか確認してください。")
     st.stop()
 
-# --- 🎯 範囲指定の設定（手入力に変更） ---
+# --- 🎯 範囲指定の設定 ---
 st.divider()
 min_rank = int(df['rank'].min()) if not df.empty and int(df['rank'].min()) > 0 else 1
 max_rank = int(df['rank'].max()) if not df.empty else 3000
 
 st.write("▼ 出題範囲を手入力で設定")
 
-# 横に2つ並べて入力欄を作成
 col1, col2 = st.columns(2)
 with col1:
     start_rank = st.number_input("スタート番号", min_value=min_rank, max_value=max_rank, value=min_rank, step=1)
 with col2:
     end_rank = st.number_input("エンド番号", min_value=min_rank, max_value=max_rank, value=min(min_rank + 99, max_rank), step=1)
 
-# エラーチェック（スタートがエンドより大きい数にならないようにする）
 if start_rank > end_rank:
     st.error("⚠️ スタート番号はエンド番号以下の数字にしてください。")
     st.stop()
 
 selected_range = (start_rank, end_rank)
-
 filtered_df = df[(df['rank'] >= selected_range[0]) & (df['rank'] <= selected_range[1])]
 
-st.info(f"📚 **{selected_range[0]} 〜 {selected_range[1]}** 番の単語から出題します。\n\n※「出題回数が少ない単語」を優先し、ランダムに出題します。")
+st.info(f"📚 **{selected_range[0]} 〜 {selected_range[1]}** 番から出題（出題回数が少ない順・ランダム）")
 
 words_json = json.dumps(filtered_df.to_dict(orient="records"))
 
@@ -85,7 +82,11 @@ html_code = f"""
 <head>
     <style>
         body {{ font-family: sans-serif; text-align: center; margin: 0; padding: 0; color: #333; }}
-        .word-container {{ padding: 10px; border: 2px solid #1E90FF; border-radius: 8px; background-color: #f0f8ff; max-width: 100%; margin: 15px auto; }}
+        .word-container {{ padding: 10px; border: 2px solid #1E90FF; border-radius: 8px; background-color: #f0f8ff; max-width: 100%; margin: 15px auto; position: relative; }}
+        
+        /* 進捗表示のデザイン */
+        .progress-text {{ font-size: 14px; font-weight: bold; color: #666; background-color: #e0f2fe; display: inline-block; padding: 4px 12px; border-radius: 12px; margin-bottom: 10px; }}
+        
         .en-word {{ font-size: 32px; font-weight: bold; color: #1E90FF; margin-bottom: 5px; }}
         .jp-word {{ font-size: 22px; color: #e74c3c; margin-bottom: 10px; min-height: 28px; display: none; }}
         hr {{ margin: 10px 0; border: none; border-top: 1px solid #ccc; }}
@@ -109,6 +110,8 @@ html_code = f"""
     <button id="stopBtn" class="action-btn" onclick="stopLearning()" style="display: none;">⏹ 停止</button>
 
     <div id="displayArea" class="word-container" style="display: none;">
+        <div id="progressDisplay" class="progress-text"></div>
+        
         <div id="enWord" class="en-word"></div>
         <div id="jpWord" class="jp-word"></div>
         <hr>
@@ -117,7 +120,6 @@ html_code = f"""
     </div>
 
     <button id="skipBtn" class="action-btn" onclick="markAsLearned()" style="display: none;">✅ 覚えた！(次回から出題しない)</button>
-
     <button id="resetBtn" class="action-btn" onclick="resetProgress()">🔄 学習記録をリセット</button>
 
     <script>
@@ -127,6 +129,7 @@ html_code = f"""
         let isPlaying = false;
         let isSkipping = false; 
         const synth = window.speechSynthesis;
+        let wakeLock = null; // ★スリープ防止用の変数
 
         let progress = JSON.parse(localStorage.getItem('ngsl_progress')) || {{}};
 
@@ -144,6 +147,25 @@ html_code = f"""
                 localStorage.removeItem('ngsl_progress');
                 progress = {{}};
                 alert("リセットが完了しました！");
+            }}
+        }}
+
+        // ★画面のスリープ（自動ロック）を防ぐ関数
+        async function requestWakeLock() {{
+            try {{
+                if ('wakeLock' in navigator) {{
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('スリープ防止がオンになりました');
+                }}
+            }} catch (err) {{
+                console.log('スリープ防止エラー:', err);
+            }}
+        }}
+
+        // ★スリープ防止を解除する関数
+        function releaseWakeLock() {{
+            if (wakeLock !== null) {{
+                wakeLock.release().then(() => {{ wakeLock = null; }});
             }}
         }}
 
@@ -177,6 +199,10 @@ html_code = f"""
 
         async function playWordSequence(wordObj) {{
             isSkipping = false;
+            
+            // ★進捗テキストの更新 (例: 15 / 100 問目)
+            document.getElementById('progressDisplay').innerText = (currentIndex + 1) + " / " + playlist.length + " 問目";
+
             document.getElementById('enWord').innerText = wordObj.en || "";
             document.getElementById('jpWord').style.display = 'none';
             document.getElementById('jpWord').innerText = wordObj.jp || "";
@@ -208,7 +234,6 @@ html_code = f"""
                 await speak(wordObj.ex_jp, 'ja-JP', 1.1);
             }}
             
-            // 最後の待機時間を0.8秒(800ミリ秒)に設定
             if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US', 0.9, 800);
         }}
 
@@ -227,6 +252,9 @@ html_code = f"""
             isPlaying = true;
             currentIndex = 0;
             
+            // ★再生開始時にスリープ防止をリクエスト
+            requestWakeLock();
+
             document.getElementById('startBtn').style.display = 'none';
             document.getElementById('resetBtn').style.display = 'none';
             document.getElementById('stopBtn').style.display = 'block';
@@ -237,7 +265,6 @@ html_code = f"""
 
             while (currentIndex < playlist.length && isPlaying) {{
                 let currentWord = playlist[currentIndex];
-                
                 progress[currentWord.rank].playCount += 1;
                 saveProgress();
 
@@ -255,6 +282,10 @@ html_code = f"""
             isPlaying = false;
             isSkipping = false;
             synth.cancel(); 
+            
+            // ★停止時にスリープ防止を解除
+            releaseWakeLock();
+
             document.getElementById('startBtn').style.display = 'block';
             document.getElementById('resetBtn').style.display = 'block';
             document.getElementById('stopBtn').style.display = 'none';
@@ -272,12 +303,24 @@ html_code = f"""
             isSkipping = true;
             synth.cancel(); 
         }}
+        
+        // ★タブを閉じたり隠したりした時も念のためスリープ防止を解除
+        document.addEventListener('visibilitychange', () => {{
+            if (document.visibilityState !== 'visible') {{
+                releaseWakeLock();
+            }} else if (isPlaying) {{
+                // 戻ってきたときに再生中なら再度ロックをかける
+                requestWakeLock();
+            }}
+        }});
+
     </script>
 </body>
 </html>
 """
 
-components.html(html_code, height=550, scrolling=True)
+# 高さを少し増やして進捗テキストが収まるようにしました
+components.html(html_code, height=600, scrolling=True)
 
 st.caption("※マナーモードを解除してご利用ください。")
 st.caption("※学習記録はブラウザに保存されるため、明日も続きから効率よく学習できます。")

@@ -84,7 +84,6 @@ html_code = f"""
         body {{ font-family: sans-serif; text-align: center; margin: 0; padding: 0; color: #333; }}
         .word-container {{ padding: 10px; border: 2px solid #1E90FF; border-radius: 8px; background-color: #f0f8ff; max-width: 100%; margin: 15px auto; position: relative; }}
         
-        /* 進捗表示のデザイン */
         .progress-text {{ font-size: 14px; font-weight: bold; color: #666; background-color: #e0f2fe; display: inline-block; padding: 4px 12px; border-radius: 12px; margin-bottom: 10px; }}
         
         .en-word {{ font-size: 32px; font-weight: bold; color: #1E90FF; margin-bottom: 5px; }}
@@ -111,7 +110,6 @@ html_code = f"""
 
     <div id="displayArea" class="word-container" style="display: none;">
         <div id="progressDisplay" class="progress-text"></div>
-        
         <div id="enWord" class="en-word"></div>
         <div id="jpWord" class="jp-word"></div>
         <hr>
@@ -129,7 +127,7 @@ html_code = f"""
         let isPlaying = false;
         let isSkipping = false; 
         const synth = window.speechSynthesis;
-        let wakeLock = null; // ★スリープ防止用の変数
+        let wakeLock = null;
 
         let progress = JSON.parse(localStorage.getItem('ngsl_progress')) || {{}};
 
@@ -150,19 +148,16 @@ html_code = f"""
             }}
         }}
 
-        // ★画面のスリープ（自動ロック）を防ぐ関数
         async function requestWakeLock() {{
             try {{
                 if ('wakeLock' in navigator) {{
                     wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('スリープ防止がオンになりました');
                 }}
             }} catch (err) {{
                 console.log('スリープ防止エラー:', err);
             }}
         }}
 
-        // ★スリープ防止を解除する関数
         function releaseWakeLock() {{
             if (wakeLock !== null) {{
                 wakeLock.release().then(() => {{ wakeLock = null; }});
@@ -180,7 +175,8 @@ html_code = f"""
             }}
         }}
 
-        function speak(text, lang, rate=0.9, pause=400) {{
+        // ★ pause（待機時間）のデフォルトを 500(0.5秒) に変更しました
+        function speak(text, lang, rate=0.9, pause=500) {{
             return new Promise((resolve) => {{
                 if (!isPlaying || isSkipping || !text || text.trim() === "") return resolve(); 
                 
@@ -200,7 +196,6 @@ html_code = f"""
         async function playWordSequence(wordObj) {{
             isSkipping = false;
             
-            // ★進捗テキストの更新 (例: 15 / 100 問目)
             document.getElementById('progressDisplay').innerText = (currentIndex + 1) + " / " + playlist.length + " 問目";
 
             document.getElementById('enWord').innerText = wordObj.en || "";
@@ -211,29 +206,41 @@ html_code = f"""
             document.getElementById('exJp').style.display = 'none';
             document.getElementById('exJp').innerText = wordObj.ex_jp || "";
 
+            // 1, 2: 英
             if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US');
             if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US');
             
+            // 3: 日
             if (!isPlaying || isSkipping) return;
             if (wordObj.jp && wordObj.jp.trim() !== "") {{
                 document.getElementById('jpWord').style.display = 'block';
                 await speak(wordObj.jp, 'ja-JP', 1.1);
             }}
 
+            // 4: 英
             if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US');
 
+            // 5: 例文英
             if (!isPlaying || isSkipping) return;
             if (wordObj.ex_en && wordObj.ex_en.trim() !== "") {{
                 document.getElementById('exEn').style.display = 'block';
                 await speak(wordObj.ex_en, 'en-US');
             }}
 
+            // 6: 例文日
             if (!isPlaying || isSkipping) return;
             if (wordObj.ex_jp && wordObj.ex_jp.trim() !== "") {{
                 document.getElementById('exJp').style.display = 'block';
                 await speak(wordObj.ex_jp, 'ja-JP', 1.1);
             }}
             
+            // 7: 例文英 (★今回追加した部分)
+            if (!isPlaying || isSkipping) return;
+            if (wordObj.ex_en && wordObj.ex_en.trim() !== "") {{
+                await speak(wordObj.ex_en, 'en-US');
+            }}
+            
+            // 8: 最後の英 (次の単語への待機時間を0.8秒(800ミリ秒)に設定)
             if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US', 0.9, 800);
         }}
 
@@ -252,7 +259,6 @@ html_code = f"""
             isPlaying = true;
             currentIndex = 0;
             
-            // ★再生開始時にスリープ防止をリクエスト
             requestWakeLock();
 
             document.getElementById('startBtn').style.display = 'none';
@@ -283,7 +289,6 @@ html_code = f"""
             isSkipping = false;
             synth.cancel(); 
             
-            // ★停止時にスリープ防止を解除
             releaseWakeLock();
 
             document.getElementById('startBtn').style.display = 'block';
@@ -304,12 +309,10 @@ html_code = f"""
             synth.cancel(); 
         }}
         
-        // ★タブを閉じたり隠したりした時も念のためスリープ防止を解除
         document.addEventListener('visibilitychange', () => {{
             if (document.visibilityState !== 'visible') {{
                 releaseWakeLock();
             }} else if (isPlaying) {{
-                // 戻ってきたときに再生中なら再度ロックをかける
                 requestWakeLock();
             }}
         }});
@@ -319,7 +322,6 @@ html_code = f"""
 </html>
 """
 
-# 高さを少し増やして進捗テキストが収まるようにしました
 components.html(html_code, height=600, scrolling=True)
 
 st.caption("※マナーモードを解除してご利用ください。")

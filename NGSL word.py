@@ -51,19 +51,26 @@ if df.empty:
     st.warning("単語データを読み込めません。vocab.csv がアップロードされているか確認してください。")
     st.stop()
 
-# --- 🎯 範囲指定の設定 ---
+# --- 🎯 範囲指定の設定（手入力に変更） ---
 st.divider()
 min_rank = int(df['rank'].min()) if not df.empty and int(df['rank'].min()) > 0 else 1
 max_rank = int(df['rank'].max()) if not df.empty else 3000
 
-st.write("▼ 出題範囲を設定（頻度順位）")
-selected_range = st.slider(
-    "出題する番号の範囲を選んでください",
-    min_value=min_rank, 
-    max_value=max_rank, 
-    value=(min_rank, min(min_rank + 99, max_rank)), 
-    label_visibility="collapsed"
-)
+st.write("▼ 出題範囲を手入力で設定")
+
+# 横に2つ並べて入力欄を作成
+col1, col2 = st.columns(2)
+with col1:
+    start_rank = st.number_input("スタート番号", min_value=min_rank, max_value=max_rank, value=min_rank, step=1)
+with col2:
+    end_rank = st.number_input("エンド番号", min_value=min_rank, max_value=max_rank, value=min(min_rank + 99, max_rank), step=1)
+
+# エラーチェック（スタートがエンドより大きい数にならないようにする）
+if start_rank > end_rank:
+    st.error("⚠️ スタート番号はエンド番号以下の数字にしてください。")
+    st.stop()
+
+selected_range = (start_rank, end_rank)
 
 filtered_df = df[(df['rank'] >= selected_range[0]) & (df['rank'] <= selected_range[1])]
 
@@ -151,7 +158,6 @@ html_code = f"""
             }}
         }}
 
-        // ★ pause（待機時間）のデフォルトを 400(0.4秒) とし、自由に変更できるようにしました
         function speak(text, lang, rate=0.9, pause=400) {{
             return new Promise((resolve) => {{
                 if (!isPlaying || isSkipping || !text || text.trim() === "") return resolve(); 
@@ -202,7 +208,7 @@ html_code = f"""
                 await speak(wordObj.ex_jp, 'ja-JP', 1.1);
             }}
             
-            // ★ココがポイント！最後の英単語を読み終わった後の間隔だけ 800ミリ秒(0.8秒) に設定しました
+            // 最後の待機時間を0.8秒(800ミリ秒)に設定
             if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US', 0.9, 800);
         }}
 

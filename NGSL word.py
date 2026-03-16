@@ -69,7 +69,6 @@ filtered_df = df[(df['rank'] >= selected_range[0]) & (df['rank'] <= selected_ran
 
 st.info(f"📚 **{selected_range[0]} 〜 {selected_range[1]}** 番の単語から出題します。\n\n※「出題回数が少ない単語」を優先し、ランダムに出題します。")
 
-# PythonからJavaScriptへデータを渡す（シャッフル・出題制御はJS側で行う）
 words_json = json.dumps(filtered_df.to_dict(orient="records"))
 
 # --- 音声再生＆学習記録UI用のHTML/JavaScript ---
@@ -86,7 +85,6 @@ html_code = f"""
         .ex-en {{ font-size: 16px; color: #555; margin-bottom: 5px; min-height: 22px; }}
         .ex-jp {{ font-size: 14px; color: #888; display: none; }}
         
-        /* ボタンのデザイン */
         .action-btn {{ padding: 14px 20px; font-size: 16px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 90%; max-width: 320px; margin: 5px auto; display: block; }}
         #startBtn {{ background-color: #1E90FF; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
         #startBtn:hover {{ background-color: #0066cc; }}
@@ -120,10 +118,9 @@ html_code = f"""
         let playlist = [];
         let currentIndex = 0;
         let isPlaying = false;
-        let isSkipping = false; // スキップ割り込み用フラグ
+        let isSkipping = false; 
         const synth = window.speechSynthesis;
 
-        // ★ブラウザのローカルストレージから「学習記録」を読み込む
         let progress = JSON.parse(localStorage.getItem('ngsl_progress')) || {{}};
 
         function getProgress(rank) {{
@@ -135,7 +132,6 @@ html_code = f"""
             localStorage.setItem('ngsl_progress', JSON.stringify(progress));
         }}
 
-        // ★リセット機能
         function resetProgress() {{
             if (confirm("『出題回数』と『覚えた単語』の記録をすべてリセットしますか？")) {{
                 localStorage.removeItem('ngsl_progress');
@@ -155,9 +151,9 @@ html_code = f"""
             }}
         }}
 
-        function speak(text, lang, rate=0.9) {{
+        // ★ pause（待機時間）のデフォルトを 400(0.4秒) とし、自由に変更できるようにしました
+        function speak(text, lang, rate=0.9, pause=400) {{
             return new Promise((resolve) => {{
-                // スキップボタンが押されたら瞬時に終了して次へ
                 if (!isPlaying || isSkipping || !text || text.trim() === "") return resolve(); 
                 
                 const utterance = new SpeechSynthesisUtterance(text);
@@ -166,7 +162,7 @@ html_code = f"""
                 if (voice) utterance.voice = voice;
                 
                 utterance.rate = rate; 
-                utterance.onend = () => {{ setTimeout(resolve, 400); }}; 
+                utterance.onend = () => {{ setTimeout(resolve, pause); }}; 
                 utterance.onerror = () => {{ setTimeout(resolve, 100); }}; 
                 
                 synth.speak(utterance);
@@ -206,22 +202,21 @@ html_code = f"""
                 await speak(wordObj.ex_jp, 'ja-JP', 1.1);
             }}
             
-            if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US');
+            // ★ココがポイント！最後の英単語を読み終わった後の間隔だけ 800ミリ秒(0.8秒) に設定しました
+            if (!isPlaying || isSkipping) return; await speak(wordObj.en, 'en-US', 0.9, 800);
         }}
 
         async function startLearning() {{
             if (words.length === 0) return;
             
-            // ★スキップ設定されていない単語だけを抽出
             playlist = words.filter(w => !getProgress(w.rank).skipped);
             if (playlist.length === 0) {{
                 alert("この範囲の単語はすべて「覚えた（スキップ）」に設定されています！必要に応じてリセットしてください。");
                 return;
             }}
 
-            // ★出題順の最適化：出題回数が少ない順に並べる（同数の場合はランダムシャッフル）
-            playlist.sort(() => Math.random() - 0.5); // 先にシャッフル
-            playlist.sort((a, b) => getProgress(a.rank).playCount - getProgress(b.rank).playCount); // 回数で昇順ソート
+            playlist.sort(() => Math.random() - 0.5); 
+            playlist.sort((a, b) => getProgress(a.rank).playCount - getProgress(b.rank).playCount); 
 
             isPlaying = true;
             currentIndex = 0;
@@ -237,7 +232,6 @@ html_code = f"""
             while (currentIndex < playlist.length && isPlaying) {{
                 let currentWord = playlist[currentIndex];
                 
-                // 再生するたびに出題回数を+1して保存
                 progress[currentWord.rank].playCount += 1;
                 saveProgress();
 
@@ -262,16 +256,13 @@ html_code = f"""
             document.getElementById('startBtn').innerText = '▶️ 再開する';
         }}
 
-        // ★「覚えた！」ボタンが押された時の処理
         function markAsLearned() {{
             if (!isPlaying || !playlist[currentIndex]) return;
             
-            // その単語をスキップリストに追加して保存
             let currentWord = playlist[currentIndex];
             progress[currentWord.rank].skipped = true;
             saveProgress();
             
-            // 現在の音声を強制キャンセル（これにより即座に次の単語へスキップします）
             isSkipping = true;
             synth.cancel(); 
         }}
@@ -280,7 +271,6 @@ html_code = f"""
 </html>
 """
 
-# 高さを増やしてボタンが隠れないように調整
 components.html(html_code, height=550, scrolling=True)
 
 st.caption("※マナーモードを解除してご利用ください。")

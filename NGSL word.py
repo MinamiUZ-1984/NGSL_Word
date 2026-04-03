@@ -3,13 +3,10 @@ import pandas as pd
 import json
 import streamlit.components.v1 as components
 
-# --- ページ設定 ---
-st.set_page_config(page_title="NGSL 究極の二刀流", page_icon="⚔️", layout="centered")
+st.set_page_config(page_title="NGSL 黄金の700語", page_icon="🔰", layout="centered")
 
-# --- タイトル表示 ---
-st.markdown("<div style='padding-top: 10px;'><h3 style='text-align: center;'>⚔️ NGSL ハイブリッド学習アプリ</h3></div>", unsafe_allow_html=True)
+st.markdown("<div style='padding-top: 10px;'><h3 style='text-align: center;'>🔰 黄金の700語：単語＆作文マスター</h3></div>", unsafe_allow_html=True)
 
-# --- データ読み込み（Colabと共通のシャッフル設定） ---
 @st.cache_data
 def load_data():
     try:
@@ -22,15 +19,17 @@ def load_data():
         new_df = pd.DataFrame()
         cols_count = df.shape[1]
         
-        # 基本データの抽出
         new_df['original_rank'] = pd.to_numeric(df.iloc[:, 0], errors='coerce').fillna(0).astype(int)
         new_df['en'] = df.iloc[:, 1]
         new_df['jp'] = df.iloc[:, 2]
         new_df['ex_en'] = df.iloc[:, 4] if cols_count > 4 else ""
         new_df['ex_jp'] = df.iloc[:, 5] if cols_count > 5 else ""
         
-        # Colabと完全に一致させるためのシャッフル（Seed=42）
-        new_df = new_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        # ★【超重要】ランク1位〜700位だけに限定し、わかりやすく順位通りに並べる
+        new_df = new_df[new_df['original_rank'] > 0]
+        new_df = new_df[new_df['original_rank'] <= 700]
+        new_df = new_df.sort_values('original_rank').reset_index(drop=True)
+        
         return new_df
     except Exception as e:
         st.error(f"CSV読み込み失敗: {e}")
@@ -39,52 +38,45 @@ def load_data():
 df = load_data()
 
 if df.empty:
+    st.warning("データが見つかりません。")
     st.stop()
 
-# --- ⚙️ 学習設定サイドバー/上部 ---
 st.divider()
 
 col1, col2 = st.columns(2)
 with col1:
-    # 🌟 モード切り替え機能
-    mode = st.radio("学習モードを選択", ["単語カード (英→日)", "瞬間英作文 (日→英)"], horizontal=True)
+    mode = st.radio("学習モード", ["単語カード (英→日)", "瞬間英作文 (日→英)"], horizontal=True)
 
 with col2:
-    # トラック選択
-    chunk_size = 100
-    total_tracks = (len(df) // chunk_size) + (1 if len(df) % chunk_size != 0 else 0)
-    selected_track = st.selectbox("トラック番号", range(1, total_tracks + 1), format_func=lambda x: f"Track {x:02d}")
+    # 700語なので、100語ずつ7ブロックに分ける
+    blocks = ["1-100位", "101-200位", "201-300位", "301-400位", "401-500位", "501-600位", "601-700位"]
+    selected_block = st.selectbox("学習範囲を選択", blocks)
 
-# --- データの準備 ---
-start_idx = (selected_track - 1) * chunk_size
-end_idx = start_idx + chunk_size
-current_df = df.iloc[start_idx:end_idx]
+start_r = int(selected_block.split('-')[0])
+end_r = int(selected_block.split('-')[1].replace('位',''))
 
-# 瞬間英作文モードの場合は例文があるものだけに絞る
+# 選択したランクのデータを抽出
+current_df = df[(df['original_rank'] >= start_r) & (df['original_rank'] <= end_r)]
+
 if "瞬間英作文" in mode:
     current_df = current_df[current_df['ex_jp'] != ""]
 
 words_json = json.dumps(current_df.to_dict(orient="records"), ensure_ascii=False).replace("</", "<\\/")
 
-# --- フラッシュカードUI (JavaScript) ---
 html_code = f"""
 <!DOCTYPE html>
 <html>
 <head>
     <style>
         body {{ font-family: sans-serif; text-align: center; margin: 0; padding: 10px; color: #333; }}
-        .card-container {{ padding: 25px 15px; border: 3px solid #3498db; border-radius: 15px; background-color: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }}
+        .card-container {{ padding: 25px 15px; border: 3px solid #f39c12; border-radius: 15px; background-color: #fffaf0; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }}
         
-        .progress-text {{ font-size: 14px; font-weight: bold; color: #666; background-color: #f0f4f8; display: inline-block; padding: 6px 16px; border-radius: 16px; margin-bottom: 15px; }}
+        .progress-text {{ font-size: 14px; font-weight: bold; color: #fff; background-color: #f39c12; display: inline-block; padding: 6px 16px; border-radius: 16px; margin-bottom: 15px; }}
         
-        /* 表面のテキスト */
         .front-text {{ font-size: 32px; font-weight: bold; color: #2c3e50; margin-bottom: 20px; line-height: 1.3; }}
-        
         #answerArea {{ display: none; }}
-        
-        /* 裏面のテキスト */
         .back-main {{ font-size: 24px; font-weight: bold; color: #e74c3c; margin-bottom: 15px; cursor: pointer; }}
-        .back-sub {{ font-size: 16px; color: #555; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; font-style: italic; margin-top: 10px; cursor: pointer; }}
+        .back-sub {{ font-size: 16px; color: #555; text-align: left; background: #f8f9fa; padding: 10px; border-radius: 8px; margin-top: 10px; cursor: pointer; }}
         
         .btn {{ padding: 16px; font-size: 18px; color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; width: 100%; max-width: 300px; margin: 10px auto; display: block; }}
         #showBtn {{ background-color: #3498db; }}
@@ -120,8 +112,7 @@ html_code = f"""
         let currentItem = null;
         const synth = window.speechSynthesis;
 
-        // モードごとに別の記録を保存
-        const storageKey = mode.includes("単語") ? "ngsl_word_v05" : "ngsl_speak_v05";
+        const storageKey = mode.includes("単語") ? "ngsl_word_700" : "ngsl_speak_700";
         let progress = JSON.parse(localStorage.getItem(storageKey) || "{{}}");
 
         function speak(text) {{
@@ -134,20 +125,28 @@ html_code = f"""
         }}
 
         function showCard() {{
+            // 覚えた単語をスキップする処理
+            while(currentIndex < allWords.length && progress[allWords[currentIndex].original_rank]) {{
+                currentIndex++;
+            }}
+            
+            if(currentIndex >= allWords.length) {{
+                alert("このブロックはすべて「覚えた」になっています！完璧です！");
+                return;
+            }}
+
             currentItem = allWords[currentIndex];
-            document.getElementById('progressDisplay').innerText = (currentIndex + 1) + " / " + allWords.length;
+            document.getElementById('progressDisplay').innerText = "Rank " + currentItem.original_rank + " (" + (currentIndex + 1) + "/" + allWords.length + ")";
             
             if (mode.includes("単語")) {{
-                // 単語カードモード：表＝英単語、裏＝日単語
                 document.getElementById('frontDisplay').innerText = currentItem.en;
                 document.getElementById('backMain').innerText = currentItem.jp;
                 document.getElementById('backSub').innerHTML = "例文: " + currentItem.ex_en + "<br><small>" + currentItem.ex_jp + "</small>";
                 speak(currentItem.en);
             }} else {{
-                // 瞬間英作文モード：表＝日例文、裏＝英例文
                 document.getElementById('frontDisplay').innerText = currentItem.ex_jp;
                 document.getElementById('backMain').innerText = currentItem.ex_en;
-                document.getElementById('backSub').innerText = "Target Word: " + currentItem.en + " (" + currentItem.jp + ")";
+                document.getElementById('backSub').innerText = "💡 Target: " + currentItem.en + " (" + currentItem.jp + ")";
             }}
             
             document.getElementById('answerArea').style.display = 'none';
@@ -177,7 +176,7 @@ html_code = f"""
             if (currentIndex < allWords.length) {{
                 showCard();
             }} else {{
-                alert("全単語終了です！お疲れ様でした！");
+                alert("このブロックは終了です！");
                 location.reload();
             }}
         }}
@@ -187,7 +186,5 @@ html_code = f"""
 </body>
 </html>
 """
-
 components.html(html_code, height=600, scrolling=True)
-
-st.caption("※「単語カード」と「瞬間英作文」の学習進捗は別々に保存されます。")
+st.caption("※単語はランク順（重要度順）に出題されます。")

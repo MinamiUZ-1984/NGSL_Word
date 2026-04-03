@@ -6,10 +6,10 @@ import streamlit.components.v1 as components
 # --- ページ設定 ---
 st.set_page_config(page_title="NGSL テスト＆管理", page_icon="📝", layout="centered")
 
-# 上部の余白をしっかり取り、文字切れを完全に防ぎます
+# 上部の余白
 st.markdown("<div style='padding-top: 20px;'><h3 style='text-align: center;'>📝 NGSL 単語テスト＆管理</h3></div>", unsafe_allow_html=True)
 
-# --- データ読み込み＆Colabと完全に同じシャッフル ---
+# --- データ読み込み＆シャッフル ---
 @st.cache_data
 def load_data():
     try:
@@ -19,7 +19,6 @@ def load_data():
             df = pd.read_csv("vocab.csv", encoding="shift_jis")
         
         df = df.fillna("")
-        
         new_df = pd.DataFrame()
         cols_count = df.shape[1]
         
@@ -30,6 +29,7 @@ def load_data():
         new_df['ex_jp'] = df.iloc[:, 5] if cols_count > 5 else ""   
         
         new_df['original_rank'] = pd.to_numeric(new_df['original_rank'], errors='coerce').fillna(0).astype(int)
+        # シード値「42」で固定シャッフル
         new_df = new_df.sample(frac=1, random_state=42).reset_index(drop=True)
         
         return new_df
@@ -40,7 +40,7 @@ def load_data():
 df = load_data()
 
 if df.empty:
-    st.warning("単語データを読み込めません。vocab.csv がアップロードされているか確認してください。")
+    st.warning("単語データを読み込めません。vocab.csv を確認してください。")
     st.stop()
 
 # --- 🎯 トラック選択 ---
@@ -48,19 +48,19 @@ st.divider()
 chunk_size = 100
 total_tracks = (len(df) // chunk_size) + (1 if len(df) % chunk_size != 0 else 0)
 
-st.write("▼ 学習するトラック（MP3の番号）を選択")
+st.write("▼ 学習するトラックを選択")
 selected_track = st.selectbox("トラック番号", range(1, total_tracks + 1), format_func=lambda x: f"Track {x:02d}")
 
 start_idx = (selected_track - 1) * chunk_size
 end_idx = start_idx + chunk_size
 track_df = df.iloc[start_idx:end_idx]
 
-st.info(f"🎧 **Track {selected_track:02d}** のテストです。\n\n⚠️ **自動では進みません！** 画面の「答えを見る」を押して、自分でサクサクめくっていく単語カードです。")
+st.info(f"🎧 **Track {selected_track:02d}** のテスト\n\n※「答えを見る」を押した後、英文をタップすると読み上げます。")
 
-# --- 超安全なデータ渡し（フリーズを100%防ぐ方式） ---
+# JSONデータ作成
 words_json = json.dumps(track_df.to_dict(orient="records"), ensure_ascii=False).replace("</", "<\\/")
 
-# --- フラッシュカードUI用のHTML/JavaScript ---
+# --- フラッシュカードUI (例文タップ対応) ---
 html_code = f"""
 <!DOCTYPE html>
 <html>
@@ -71,26 +71,29 @@ html_code = f"""
         
         .progress-text {{ font-size: 15px; font-weight: bold; color: #666; background-color: #e0f2fe; display: inline-block; padding: 8px 16px; border-radius: 16px; margin-bottom: 20px; }}
         
-        .en-word {{ font-size: 32px; font-weight: bold; color: #2c3e50; margin-bottom: 15px; word-wrap: break-word; }}
+        .en-word {{ font-size: 32px; font-weight: bold; color: #2c3e50; margin-bottom: 15px; cursor: pointer; }}
         
         #answerArea {{ display: none; }}
-        .jp-word {{ font-size: 22px; font-weight: bold; color: #e74c3c; margin-bottom: 10px; word-wrap: break-word; }}
+        .jp-word {{ font-size: 22px; font-weight: bold; color: #e74c3c; margin-bottom: 10px; }}
         hr {{ margin: 15px 0; border: none; border-top: 1px dashed #ccc; }}
-        .ex-en {{ font-size: 16px; color: #555; margin-bottom: 5px; font-style: italic; text-align: left; }}
-        .ex-jp {{ font-size: 14px; color: #888; text-align: left; }}
         
-        .btn {{ padding: 16px 20px; font-size: 18px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; max-width: 320px; margin: 10px auto; display: block; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        /* 例文エリアのデザイン：タップ可能であることを示す */
+        .ex-container {{ background-color: #f0f4f8; padding: 10px; border-radius: 8px; cursor: pointer; transition: background 0.2s; text-align: left; position: relative; }}
+        .ex-container:active {{ background-color: #d1e3f0; }}
+        .ex-label {{ font-size: 10px; color: #3498db; font-weight: bold; display: block; margin-bottom: 3px; }}
+        .ex-en {{ font-size: 16px; color: #2c3e50; margin-bottom: 5px; font-style: italic; line-height: 1.4; }}
+        .ex-jp {{ font-size: 13px; color: #777; line-height: 1.3; }}
+        
+        .btn {{ padding: 16px 20px; font-size: 18px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; width: 100%; max-width: 320px; margin: 10px auto; display: block; }}
         
         #showAnswerBtn {{ background-color: #3498db; margin-top: 25px; }}
-        #speakBtn {{ background-color: #9b59b6; padding: 12px 15px; font-size: 15px; width: auto; display: inline-block; margin-bottom: 10px; }}
         
         .judge-container {{ display: flex; justify-content: center; gap: 15px; margin-top: 25px; }}
-        .judge-btn {{ padding: 16px 10px; font-size: 18px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; flex: 1; max-width: 150px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }}
+        .judge-btn {{ padding: 16px 10px; font-size: 18px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; flex: 1; max-width: 150px; }}
         #learnedBtn {{ background-color: #2ecc71; }}
         #learningBtn {{ background-color: #e67e22; }}
         
         #resetBtn {{ background-color: #95a5a6; font-size: 14px; padding: 10px 20px; width: auto; margin-top: 40px; display: inline-block; }}
-        #errorMsg {{ color: red; font-weight: bold; margin-top: 20px; display: none; }}
     </style>
 </head>
 <body>
@@ -98,21 +101,22 @@ html_code = f"""
     <script type="application/json" id="wordsData">{words_json}</script>
 
     <button id="startBtn" class="btn" style="background-color: #1E90FF;" onclick="startTest()">▶️ テストを開始する</button>
-    <div id="errorMsg"></div>
 
     <div id="displayArea" class="card-container" style="display: none;">
         <div id="progressDisplay" class="progress-text"></div>
         
-        <div id="enWord" class="en-word"></div>
-        <button id="speakBtn" class="btn" onclick="speakWord()">🔊 発音を聞く</button>
+        <div id="enWord" class="en-word" onclick="speakText(currentWordObj.en)"></div>
         
         <button id="showAnswerBtn" class="btn" onclick="showAnswer()">👀 答えを見る</button>
 
         <div id="answerArea">
             <div id="jpWord" class="jp-word"></div>
             <hr>
-            <div id="exEn" class="ex-en"></div>
-            <div id="exJp" class="ex-jp"></div>
+            <div class="ex-container" onclick="speakText(currentWordObj.ex_en)">
+                <span class="ex-label">🔊 Tap to Listen</span>
+                <div id="exEn" class="ex-en"></div>
+                <div id="exJp" class="ex-jp"></div>
+            </div>
             
             <div class="judge-container">
                 <button id="learningBtn" class="judge-btn" onclick="nextWord(false)">❌ まだ</button>
@@ -130,85 +134,60 @@ html_code = f"""
         let currentWordObj = null;
         const synth = window.speechSynthesis;
 
-        // エラーを出さずにデータを読み込む最強の仕組み
         try {{
-            const dataText = document.getElementById('wordsData').textContent;
-            allWords = JSON.parse(dataText);
-        }} catch(e) {{
-            document.getElementById('errorMsg').innerText = "データ読み込みエラー: " + e.message;
-            document.getElementById('errorMsg').style.display = 'block';
-        }}
+            allWords = JSON.parse(document.getElementById('wordsData').textContent);
+        }} catch(e) {{ console.error("Data error", e); }}
 
-        let progress = {{}};
-        try {{
-            let saved = localStorage.getItem('ngsl_progress');
-            if (saved && saved !== "null") {{
-                progress = JSON.parse(saved) || {{}};
-            }}
-        }} catch (e) {{
-            console.log("記録の読み込みエラー:", e);
-        }}
-
-        function getProgress(rank) {{
-            if (!progress[rank]) {{ progress[rank] = {{ playCount: 0, skipped: false }}; }}
-            return progress[rank];
-        }}
+        let progress = JSON.parse(localStorage.getItem('ngsl_progress') || "{{}}");
 
         function saveProgress() {{
-            try {{
-                localStorage.setItem('ngsl_progress', JSON.stringify(progress));
-            }} catch(e) {{}}
+            localStorage.setItem('ngsl_progress', JSON.stringify(progress));
         }}
 
         function resetProgress() {{
-            if (confirm("すべての学習記録（覚えた単語）をリセットしますか？")) {{
+            if (confirm("記録をリセットしますか？")) {{
                 localStorage.removeItem('ngsl_progress');
                 progress = {{}};
-                alert("リセットしました！");
+                location.reload();
             }}
         }}
 
-        function speakWord() {{
-            if (!currentWordObj || !currentWordObj.en) return;
+        // 指定されたテキストを読み上げる汎用関数
+        function speakText(text) {{
+            if (!text) return;
             synth.cancel();
-            const utterance = new SpeechSynthesisUtterance(currentWordObj.en);
+            const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'en-US';
+            utterance.rate = 0.9;
             synth.speak(utterance);
         }}
 
         function startTest() {{
-            if (allWords.length === 0) return;
-            
-            playlist = allWords.filter(w => !getProgress(w.original_rank).skipped);
-            
+            playlist = allWords.filter(w => !progress[w.original_rank]?.skipped);
             if (playlist.length === 0) {{
-                alert("🎉 このトラックの単語はすべて「覚えた」になっています！完璧です！");
+                alert("このトラックは完了しています！");
                 return;
             }}
-
             currentIndex = 0;
             document.getElementById('startBtn').style.display = 'none';
             document.getElementById('resetBtn').style.display = 'none';
             document.getElementById('displayArea').style.display = 'block';
-            
             showCurrentCard();
         }}
 
         function showCurrentCard() {{
             currentWordObj = playlist[currentIndex];
-            
-            document.getElementById('progressDisplay').innerText = `残り ${{playlist.length - currentIndex}} 語 / 全 ${{playlist.length}} 語`;
-            document.getElementById('enWord').innerText = currentWordObj.en || "";
-            
+            document.getElementById('progressDisplay').innerText = `残り ${{playlist.length - currentIndex}} 語 / ${{playlist.length}}`;
+            document.getElementById('enWord').innerText = currentWordObj.en;
             document.getElementById('answerArea').style.display = 'none';
             document.getElementById('showAnswerBtn').style.display = 'block';
             
-            document.getElementById('jpWord').innerText = currentWordObj.jp || "";
-            document.getElementById('exEn').innerText = currentWordObj.ex_en || "";
-            document.getElementById('exJp').innerText = currentWordObj.ex_jp || "";
+            document.getElementById('jpWord').innerText = currentWordObj.jp;
+            document.getElementById('exEn').innerText = currentWordObj.ex_en;
+            document.getElementById('exJp').innerText = currentWordObj.ex_jp;
             
-            // ★カードが出た瞬間に1回だけ英語を発音する
-            setTimeout(speakWord, 200);
+            // 出現時に単語を自動再生
+            setTimeout(() => speakText(currentWordObj.en), 300);
         }}
 
         function showAnswer() {{
@@ -218,22 +197,16 @@ html_code = f"""
 
         function nextWord(isLearned) {{
             if (isLearned) {{
-                let rank = currentWordObj.original_rank;
-                if (!progress[rank]) {{ progress[rank] = {{ playCount: 0, skipped: false }}; }}
-                progress[rank].skipped = true;
+                if (!progress[currentWordObj.original_rank]) progress[currentWordObj.original_rank] = {{}};
+                progress[currentWordObj.original_rank].skipped = true;
                 saveProgress();
             }}
-            
             currentIndex++;
-            
             if (currentIndex < playlist.length) {{
                 showCurrentCard();
             }} else {{
-                alert("🏁 このトラックの今回のテストが終了しました！\\nお疲れ様でした！");
-                document.getElementById('displayArea').style.display = 'none';
-                document.getElementById('startBtn').style.display = 'block';
-                document.getElementById('startBtn').innerText = '🔄 もう一度テストする';
-                document.getElementById('resetBtn').style.display = 'block';
+                alert("終了！");
+                location.reload();
             }}
         }}
     </script>
@@ -241,5 +214,4 @@ html_code = f"""
 </html>
 """
 
-# 表示枠をさらに大きく広げて文字切れを根絶しました
 components.html(html_code, height=900, scrolling=True)

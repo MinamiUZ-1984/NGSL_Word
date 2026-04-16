@@ -13,15 +13,23 @@ def load_data():
             df = pd.read_csv("vocab.csv", encoding="utf-8")
         except UnicodeDecodeError:
             df = pd.read_csv("vocab.csv", encoding="shift_jis")
-        df = df.fillna("")
-        df['rank'] = pd.to_numeric(df.iloc[:, 0], errors='coerce').fillna(9999).astype(int)
         
-        # 【重要】どちらも同じSeed(42)でシャッフルし、MP3と連動させる
+        df = df.fillna("")
+        new_df = pd.DataFrame()
+        cols_count = df.shape[1]
+        
+        # ★【修正】ここでしっかり列名（en, jp, ex_en, ex_jp）を定義します！
+        new_df['rank'] = pd.to_numeric(df.iloc[:, 0], errors='coerce').fillna(9999).astype(int)
+        new_df['en'] = df.iloc[:, 1] if cols_count > 1 else ""
+        new_df['jp'] = df.iloc[:, 2] if cols_count > 2 else ""      
+        new_df['ex_en'] = df.iloc[:, 4] if cols_count > 4 else ""   
+        new_df['ex_jp'] = df.iloc[:, 5] if cols_count > 5 else ""   
+        
         # 作戦A：全単語用（3000語）
-        df_all = df.sample(frac=1, random_state=42).reset_index(drop=True)
+        df_all = new_df.sample(frac=1, random_state=42).reset_index(drop=True)
         
         # 作戦B：700語限定用
-        df_700_base = df[df['rank'] <= 700].copy()
+        df_700_base = new_df[new_df['rank'] <= 700].copy()
         df_700 = df_700_base.sample(frac=1, random_state=42).reset_index(drop=True)
         
         return df_all, df_700
@@ -48,7 +56,7 @@ if "作戦A" in course:
     target_df = df_all
     chunk_size = 100
     total_tracks = 30
-    sub_mode = "単語カード" # Aはカード固定
+    sub_mode = "単語カード"
     st.info("MP3のTrack 01〜30と連動しています。全単語を効率よくインプットしましょう。")
 else:
     st.subheader("🔥 最重要700語・徹底特訓")
@@ -63,6 +71,8 @@ selected_track = st.selectbox(f"トラックを選択 (全{total_tracks}回)", r
 
 # 表示データの抽出
 track_data = target_df.iloc[(selected_track-1)*chunk_size : selected_track*chunk_size]
+
+# ★瞬間英作文モードの時は、日本語の例文があるデータだけに絞る
 if sub_mode == "瞬間英作文":
     track_data = track_data[track_data['ex_jp'] != ""]
 
@@ -73,7 +83,6 @@ html_code = f"""
 <!DOCTYPE html><html><head><style>
     body {{ font-family: sans-serif; text-align: center; padding: 10px; color: #333; }}
     .card-container {{ padding: 25px 15px; border-radius: 15px; background: #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }}
-    /* コースによって枠の色を変える */
     .border-a {{ border: 3px solid #2ecc71; }}
     .border-b {{ border: 3px solid #e74c3c; }}
     
@@ -113,7 +122,6 @@ html_code = f"""
         const course = "{course}";
         let idx = 0; let curr = null; const synth = window.speechSynthesis;
         
-        // 保存キーをコース・モード別に分ける
         const storageKey = course.includes("作戦A") ? "ngsl_a_full" : (subMode === "単語カード" ? "ngsl_b_card" : "ngsl_b_speak");
         let prog = JSON.parse(localStorage.getItem(storageKey) || "{{}}");
 

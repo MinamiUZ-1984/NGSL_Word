@@ -18,7 +18,6 @@ def load_data():
         new_df = pd.DataFrame()
         cols_count = df.shape[1]
         
-        # ★【修正】ここでしっかり列名（en, jp, ex_en, ex_jp）を定義します！
         new_df['rank'] = pd.to_numeric(df.iloc[:, 0], errors='coerce').fillna(9999).astype(int)
         new_df['en'] = df.iloc[:, 1] if cols_count > 1 else ""
         new_df['jp'] = df.iloc[:, 2] if cols_count > 2 else ""      
@@ -57,14 +56,14 @@ if "作戦A" in course:
     chunk_size = 100
     total_tracks = 30
     sub_mode = "単語カード"
-    st.info("MP3のTrack 01〜30と連動しています。全単語を効率よくインプットしましょう。")
+    st.info("MP3のTrack 01〜30と連動しています。")
 else:
     st.subheader("🔥 最重要700語・徹底特訓")
     target_df = df_700
     chunk_size = 70
     total_tracks = 10
     sub_mode = st.radio("特訓メニュー", ["単語カード", "瞬間英作文"], horizontal=True)
-    st.info("日常会話の7割を占める700語を、10トラックで完璧に使いこなせるようにします。")
+    st.info("日常会話の7割を占める700語を完璧に使いこなせるようにします。")
 
 # トラック選択
 selected_track = st.selectbox(f"トラックを選択 (全{total_tracks}回)", range(1, total_tracks + 1), format_func=lambda x: f"Track {x:02d}")
@@ -72,7 +71,6 @@ selected_track = st.selectbox(f"トラックを選択 (全{total_tracks}回)", r
 # 表示データの抽出
 track_data = target_df.iloc[(selected_track-1)*chunk_size : selected_track*chunk_size]
 
-# ★瞬間英作文モードの時は、日本語の例文があるデータだけに絞る
 if sub_mode == "瞬間英作文":
     track_data = track_data[track_data['ex_jp'] != ""]
 
@@ -87,7 +85,7 @@ html_code = f"""
     .border-b {{ border: 3px solid #e74c3c; }}
     
     .progress {{ font-size: 13px; font-weight: bold; color: #666; margin-bottom: 15px; }}
-    .front-text {{ font-size: 28px; font-weight: bold; color: #2c3e50; min-height: 80px; display: flex; align-items: center; justify-content: center; line-height: 1.3; }}
+    .front-text {{ font-size: 28px; font-weight: bold; color: #2c3e50; min-height: 80px; display: flex; align-items: center; justify-content: center; line-height: 1.3; white-space: pre-wrap; }}
     
     #answerArea {{ display: none; }}
     .back-main {{ font-size: 22px; font-weight: bold; color: #e74c3c; margin: 15px 0; cursor: pointer; }}
@@ -98,6 +96,10 @@ html_code = f"""
     
     .judge-box {{ display: flex; gap: 10px; margin-top: 20px; }}
     .judge-btn {{ flex: 1; padding: 15px; border-radius: 10px; color: white; font-weight: bold; border: none; cursor: pointer; }}
+    
+    /* リセットボタンエリアのデザイン */
+    .reset-area {{ margin-top: 30px; border-top: 1px dashed #ccc; padding-top: 20px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }}
+    .reset-btn {{ padding: 12px; font-size: 14px; color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; flex: 1; min-width: 130px; max-width: 180px; }}
 </style></head><body>
     <div class="card-container {"border-a" if "作戦A" in course else "border-b"}">
         <div id="progress" class="progress"></div>
@@ -114,6 +116,11 @@ html_code = f"""
                 <button class="judge-btn" style="background:#2ecc71" onclick="next(true)">✅ 完璧</button>
             </div>
         </div>
+        
+        <div class="reset-area">
+            <button class="reset-btn" style="background:#95a5a6" onclick="resetTrack()">🔄 このトラックをリセット</button>
+            <button class="reset-btn" style="background:#c0392b" onclick="resetAll()">⚠️ すべてリセット</button>
+        </div>
     </div>
 
     <script>
@@ -129,7 +136,15 @@ html_code = f"""
         
         function loadCard() {{
             while(idx < words.length && prog[words[idx].rank]) idx++;
-            if(idx >= words.length) {{ alert("このトラックは完了です！"); location.reload(); return; }}
+            
+            // ★修正：すべて完了した場合は、フリーズせずに「完了画面」を表示する
+            if(idx >= words.length) {{ 
+                document.getElementById('progress').innerText = "100% 完了！";
+                document.getElementById('front').innerText = "🎉 このトラックは完璧です！\\n下のリセットボタンから再挑戦できます。";
+                document.getElementById('showBtn').style.display = 'none';
+                document.getElementById('answerArea').style.display = 'none';
+                return; 
+            }}
             
             curr = words[idx];
             document.getElementById('progress').innerText = (idx+1) + " / " + words.length + " (Rank: " + curr.rank + ")";
@@ -161,11 +176,34 @@ html_code = f"""
             if(learned) {{ prog[curr.rank] = true; localStorage.setItem(storageKey, JSON.stringify(prog)); }}
             idx++; loadCard();
         }}
+        
+        // ★新設：いま選んでいるトラックだけの記録を消す
+        function resetTrack() {{
+            if(confirm("このトラックの学習記録をリセットして、もう一度最初から学習しますか？")) {{
+                words.forEach(w => {{
+                    delete prog[w.rank];
+                }});
+                localStorage.setItem(storageKey, JSON.stringify(prog));
+                alert("このトラックをリセットしました！");
+                location.reload();
+            }}
+        }}
+
+        // ★新設：いまのモードの全ての記録を消す
+        function resetAll() {{
+            if(confirm("【警告】現在のコース・モードの『すべてのトラック』の記録を完全にリセットしますか？\\n※他のモードの記録は消えません。")) {{
+                localStorage.removeItem(storageKey);
+                alert("すべての記録をリセットしました！");
+                location.reload();
+            }}
+        }}
+
         loadCard();
     </script>
 </body></html>
 """
-components.html(html_code, height=650, scrolling=True)
+# リセットボタンを追加したため、高さを広げました
+components.html(html_code, height=750, scrolling=True)
 
 st.caption("💡 **ヒント**")
 st.caption("・作戦A：全3000語をMP3で聞き流し、アプリで意味を素早くチェック。")
